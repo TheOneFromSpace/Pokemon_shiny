@@ -59,7 +59,7 @@ def save_progress(data):
 
 def get_all_pokemon():
     """Get complete list with generation info"""
-    print("Fetching Pokémon database...")
+    print("Fetching Pokémon db...")
     url = "https://pokemondb.net/pokedex/all"
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
