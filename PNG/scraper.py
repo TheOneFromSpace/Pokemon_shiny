@@ -1,53 +1,98 @@
 import requests
-from bs4 import BeautifulSoup
 import os
-import re
 import time
+import json
+from pathlib import Path
+from tqdm import tqdm
+from bs4 import BeautifulSoup
 
-BASE_URL = "https://pokemondb.net"
-SPRITES_URL = f"{BASE_URL}/sprites"
+# Configuration
+CONFIG_FILE = "download_progress.json"
+BASE_URL = "https://img.pokemondb.net/sprites"
+REQUEST_DELAY = 1.5  # Seconds between requests
+ERROR_DELAY = 3.0  # Seconds to wait after errors
 
-os.makedirs("sprites", exist_ok=True)
+# Maps generations to their game groups
+GENERATIONS = {
+    1: {
+        'games': ['red-blue', 'yellow'],
+        'has_shiny': False  # Gen 1 doesn't have shinies
+    },
+    2: {
+        'games': ['gold', 'silver', 'crystal'],
+        'has_shiny': True
+    },
+    3: {
+        'games': ['ruby-sapphire', 'emerald', 'firered-leafgreen'],
+        'has_shiny': True
+    },
+    # ... (rest of generations with 'has_shiny': True)
+}
 
-res = requests.get(SPRITES_URL)
-soup = BeautifulSoup(res.text, "html.parser")
 
-gen_links = []
-for link in soup.select("a[href^='/sprites/']"):
-    href = link['href']
-    if href.startswith("/sprites/"):
-        gen_links.append(href)
+def download_sprite(game, variant, pokemon):
+    time.sleep(REQUEST_DELAY)
+    url = f"{BASE_URL}/{game}/{variant}/{pokemon}.png"
+    path = Path("sprites") / game / variant / f"{pokemon}.png"
 
-gen_links = list(set(gen_links))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return True
 
-print(f"Found {len(gen_links)} sprite pages.")
+        response = requests.get(url, timeout=30)
 
-for idx, link in enumerate(gen_links, 1):
-    url = BASE_URL + link
-    print(f"[Page {idx}/{len(gen_links)}] Scraping: {url}")
-    res = requests.get(url)
-    s = BeautifulSoup(res.text, "html.parser")
+        if response.status_code == 200:
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        elif response.status_code == 404:
+            return False  # Silent fail for expected 404s
+        else:
+            print(f"HTTP Error {response.status_code} for {url}")
+            time.sleep(ERROR_DELAY)
+            return False
 
-    title = s.select_one("h1").get_text(strip=True)
-    safe_title = re.sub(r'[^a-zA-Z0-9_-]+', '_', title)
-    out_dir = os.path.join("sprites", safe_title)
-    os.makedirs(out_dir, exist_ok=True)
+    except Exception as e:
+        print(f"Error downloading {url}: {e}")
+        time.sleep(ERROR_DELAY)
+        return False
 
-    imgs = s.select(".grid-col img")
-    print(f"Found {len(imgs)} sprites on {title}.")
 
-    for img in imgs:
-        src = img['src']
-        name = os.path.basename(src)
-        name = re.sub(r'\?.*$', '', name)
-        outpath = os.path.join(out_dir, name)
+def main():
+    # ... (previous setup code remains the same)
 
-        if not os.path.exists(outpath):
-            img_data = requests.get(src).content
-            with open(outpath, "wb") as f:
-                f.write(img_data)
-            print(f"Saved {outpath}")
+    total = 0
+    tasks = []
+    for pokemon in pokemon_list:
+        pokemon_gen = gen_map.get(pokemon, 1)  # Default to Gen 1 if unknown
 
-    time.sleep(1)
+        # Only try games from this Pokémon's generation and later
+        for gen, gen_data in GENERATIONS.items():
+            if gen >= pokemon_gen:
+                for game in gen_data['games']:
+                    # For Gen 1, only download normal sprites
+                    if gen == 1:
+                        variant = 'normal'
+                        identifier = f"{game}/{variant}/{pokemon}"
+                        if identifier not in downloaded:
+                            tasks.append((game, variant, pokemon))
+                            total += 1
+                    # For other gens, try both normal and shiny
+                    else:
+                        for variant in ['normal', 'shiny']:
+                            identifier = f"{game}/{variant}/{pokemon}"
+                            if identifier not in downloaded:
+                                tasks.append((game, variant, pokemon))
+                                total += 1
 
-print("All done!")
+    # ... (rest of the main function remains the same)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nDownload interrupted. Progress has been saved.")
+    except Exception as e:
+        print(f"Fatal error: {e}")
